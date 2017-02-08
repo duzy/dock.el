@@ -1,4 +1,4 @@
-;;; docked.el --- Dockerized shell mode interface shell command line into container
+;;; dock.el --- Dockerized shell mode interface shell command line into container
 
 ;; Author: Duzy Chan <code@duzy.info>
 
@@ -26,7 +26,7 @@
 (require 'comint)
 (require 'pcomplete)
 
-(defvar docked-docker-command "/usr/bin/docker"
+(defvar dock-docker-command "/usr/bin/docker"
   "The file name of `docker' command.")
 
 (defcustom docked-prompt-pattern "^[^#$%>\n]*[#$%>] *"
@@ -43,7 +43,32 @@ The pattern should probably not match more than one line.  If it does,
 Shell mode may become confused trying to distinguish prompt from input
 on lines which don't start with a prompt."
   :type 'regexp
-  :group 'docked)
+  :group 'dock)
+
+(defun dock-command-options ()
+  (cond
+   ((string= command "run")
+    (append
+     (list
+      (format "--name=%s" name)
+      "--rm=true" ;; remove container when terminated
+      "-e" "TERM=dump" ;; this fixes the command prompt error
+      ;;"-e" "TERM=xterm-256color" ;; this enables color but command prompts error
+      ;;"-e" "TERM=xterm-color" ;; this enables color but command prompts error
+      ;;"-e" "PROMPT_COMMAND=echo \"----- NODE#$NODE\"" ;; command to execute after each command line
+      "-e" (format "INSIDE_EMACS=%s,comint" emacs-version)
+      "-e" "EMACS=t" ;; INSIDE_EMACS, EMACS for compatibility
+      "-e" dircolors ;; See command line `dircolors'.
+      "-e" (format "NODE=%d" num))
+     (if (listp options) options)
+     (list "-t" "-i" image)
+     (if (and xargs-name (boundp xargs-name))
+         (symbol-value xargs-name))))
+   ((string= command "exec")
+    (append
+     (list "-t" "-i" name)
+     (if (listp exec-command) exec-command)))
+   (t nil)))
 
 (define-derived-mode docked-shell-mode comint-mode "Docked"
   "\\[docked-shell-mode-map]"
@@ -59,11 +84,11 @@ on lines which don't start with a prompt."
   (hl-line-mode t))
 
 ;;;###autoload
-(defun docked-shell (&optional buffer)
-;;   "Run an inferior shell in a docker container, with I/O through BUFFER
-;; (which defaults to `*shell*'). Interactively, a prefix arg means to prompt
-;; for BUFFER. If `default-directory' is a remote file name, it is also 
-;; prompted to change if called with a prefix arg."
+(defun dock (&optional buffer)
+  ;;   "Run an inferior shell in a docker container, with I/O through BUFFER
+  ;; (which defaults to `*shell*'). Interactively, a prefix arg means to prompt
+  ;; for BUFFER. If `default-directory' is a remote file name, it is also 
+  ;; prompted to change if called with a prefix arg."
   (interactive
    (list 
     (and current-prefix-arg
@@ -97,22 +122,23 @@ on lines which don't start with a prompt."
   ;;
   ;; Create the comint process if there is no buffer.
   (unless (comint-check-proc buffer)
-    (let* ((num (or current-prefix-arg 0))
-           (prog (or docked-docker-command (getenv "DOCKER")))
-           (docking-image "ubuntu")
-	   (docking-name (or (format "%s-node-%d" docking-image num)
-                     (file-name-nondirectory prog)))
-           (prev (shell-command-to-string (format "docker ps -a | grep %s | awk '{print $1}'" docking-name)))
-	   (xargs-name (intern-soft (concat "explicit-" docking-name "-args")))
-           (dircolors "LS_COLORS='rs=0:di=01;34:ln=01;36:mh=00:pi=40;33:so=01;35:do=01;35:bd=40;33;01:cd=40;33;01:or=40;31;01:mi=00:su=37;41:sg=30;43:ca=30;41:tw=30;42:ow=34;42:st=37;44:ex=01;32:*.tar=01;31:*.tgz=01;31:*.arc=01;31:*.arj=01;31:*.taz=01;31:*.lha=01;31:*.lz4=01;31:*.lzh=01;31:*.lzma=01;31:*.tlz=01;31:*.txz=01;31:*.tzo=01;31:*.t7z=01;31:*.zip=01;31:*.z=01;31:*.Z=01;31:*.dz=01;31:*.gz=01;31:*.lrz=01;31:*.lz=01;31:*.lzo=01;31:*.xz=01;31:*.bz2=01;31:*.bz=01;31:*.tbz=01;31:*.tbz2=01;31:*.tz=01;31:*.deb=01;31:*.rpm=01;31:*.jar=01;31:*.war=01;31:*.ear=01;31:*.sar=01;31:*.rar=01;31:*.alz=01;31:*.ace=01;31:*.zoo=01;31:*.cpio=01;31:*.7z=01;31:*.rz=01;31:*.cab=01;31:*.jpg=01;35:*.jpeg=01;35:*.gif=01;35:*.bmp=01;35:*.pbm=01;35:*.pgm=01;35:*.ppm=01;35:*.tga=01;35:*.xbm=01;35:*.xpm=01;35:*.tif=01;35:*.tiff=01;35:*.png=01;35:*.svg=01;35:*.svgz=01;35:*.mng=01;35:*.pcx=01;35:*.mov=01;35:*.mpg=01;35:*.mpeg=01;35:*.m2v=01;35:*.mkv=01;35:*.webm=01;35:*.ogm=01;35:*.mp4=01;35:*.m4v=01;35:*.mp4v=01;35:*.vob=01;35:*.qt=01;35:*.nuv=01;35:*.wmv=01;35:*.asf=01;35:*.rm=01;35:*.rmvb=01;35:*.flc=01;35:*.avi=01;35:*.fli=01;35:*.flv=01;35:*.gl=01;35:*.dl=01;35:*.xcf=01;35:*.xwd=01;35:*.yuv=01;35:*.cgm=01;35:*.emf=01;35:*.ogv=01;35:*.ogx=01;35:*.aac=00;36:*.au=00;36:*.flac=00;36:*.m4a=00;36:*.mid=00;36:*.midi=00;36:*.mka=00;36:*.mp3=00;36:*.mpc=00;36:*.ogg=00;36:*.ra=00;36:*.wav=00;36:*.oga=00;36:*.opus=00;36:*.spx=00;36:*.xspf=00;36:'")
-           (docking-args '("")))
+    (let* ((prog (or dock-docker-command (getenv "DOCKER")))
+           (num (or current-prefix-arg 0)) ; prefix number
+           (command "run") ; default command is `run'
+           (image "ubuntu") ; default image is `ubuntu'
+	   (name (format "%s-node-%d" image num)) ; (file-name-nondirectory prog)
+           (options '(""))
+           (exec-command '(""))
+	   (xargs-name (intern-soft (concat "explicit-" name "-args")))
+           (prev (shell-command-to-string (format "docker ps -a | grep %s | awk '{print $1}'" name)))
+           (dircolors "LS_COLORS='rs=0:di=01;34:ln=01;36:mh=00:pi=40;33:so=01;35:do=01;35:bd=40;33;01:cd=40;33;01:or=40;31;01:mi=00:su=37;41:sg=30;43:ca=30;41:tw=30;42:ow=34;42:st=37;44:ex=01;32:*.tar=01;31:*.tgz=01;31:*.arc=01;31:*.arj=01;31:*.taz=01;31:*.lha=01;31:*.lz4=01;31:*.lzh=01;31:*.lzma=01;31:*.tlz=01;31:*.txz=01;31:*.tzo=01;31:*.t7z=01;31:*.zip=01;31:*.z=01;31:*.Z=01;31:*.dz=01;31:*.gz=01;31:*.lrz=01;31:*.lz=01;31:*.lzo=01;31:*.xz=01;31:*.bz2=01;31:*.bz=01;31:*.tbz=01;31:*.tbz2=01;31:*.tz=01;31:*.deb=01;31:*.rpm=01;31:*.jar=01;31:*.war=01;31:*.ear=01;31:*.sar=01;31:*.rar=01;31:*.alz=01;31:*.ace=01;31:*.zoo=01;31:*.cpio=01;31:*.7z=01;31:*.rz=01;31:*.cab=01;31:*.jpg=01;35:*.jpeg=01;35:*.gif=01;35:*.bmp=01;35:*.pbm=01;35:*.pgm=01;35:*.ppm=01;35:*.tga=01;35:*.xbm=01;35:*.xpm=01;35:*.tif=01;35:*.tiff=01;35:*.png=01;35:*.svg=01;35:*.svgz=01;35:*.mng=01;35:*.pcx=01;35:*.mov=01;35:*.mpg=01;35:*.mpeg=01;35:*.m2v=01;35:*.mkv=01;35:*.webm=01;35:*.ogm=01;35:*.mp4=01;35:*.m4v=01;35:*.mp4v=01;35:*.vob=01;35:*.qt=01;35:*.nuv=01;35:*.wmv=01;35:*.asf=01;35:*.rm=01;35:*.rmvb=01;35:*.flc=01;35:*.avi=01;35:*.fli=01;35:*.flv=01;35:*.gl=01;35:*.dl=01;35:*.xcf=01;35:*.xwd=01;35:*.yuv=01;35:*.cgm=01;35:*.emf=01;35:*.ogv=01;35:*.ogx=01;35:*.aac=00;36:*.au=00;36:*.flac=00;36:*.m4a=00;36:*.mid=00;36:*.midi=00;36:*.mka=00;36:*.mp3=00;36:*.mpc=00;36:*.ogg=00;36:*.ra=00;36:*.wav=00;36:*.oga=00;36:*.opus=00;36:*.spx=00;36:*.xspf=00;36:'"))
       ;; Kill previous container of the name.
       (if (not (string= prev ""))
           (progn
             (shell-command-to-string (format "docker kill %s" prev))
             (shell-command-to-string (format "docker rm %s" prev))))
-      ;; Load .docked file.
-      (let ((confile (concat default-directory ".docked")))
+      ;; Load .dock file.
+      (let ((confile (concat default-directory ".dock")))
         (if (file-exists-p confile) ;file-name-as-directory
             (condition-case er 
                 (if (file-directory-p confile)
@@ -122,27 +148,14 @@ on lines which don't start with a prompt."
                   (load-file confile))
               (message (format "errors exists (%s)" confile)))))
       ;; Starts the container.
-      (apply 'make-comint-in-buffer (format "docked:%s" docking-name) buffer prog nil
-             "run" (format "--name=%s" docking-name) 
-             "--rm=true" ;; remove container when terminated
-             "-e" "TERM=dump" ;; this fixes the command prompt error
-             ;;"-e" "TERM=xterm-256color" ;; this enables color but command prompts error
-             ;;"-e" "TERM=xterm-color" ;; this enables color but command prompts error
-             ;;"-e" "PROMPT_COMMAND=echo \"----- NODE#$NODE\"" ;; command to execute after each command line
-             "-e" (format "INSIDE_EMACS=%s,comint" emacs-version)
-             "-e" "EMACS=t" ;; INSIDE_EMACS, EMACS for compatibility
-             "-e" dircolors ;; See command line `dircolors'.
-             "-e" (format "NODE=%d" num)
-             (append
-              (if (listp docking-args) docking-args)
-              (list "-t" "-i" docking-image)
-              (if (and xargs-name (boundp xargs-name))
-                  (symbol-value xargs-name))))
+      (message (format "dock: %s %s" command (dock-command-options)))
+      (apply 'make-comint-in-buffer (format "docked:%s" name) buffer 
+             prog nil command (dock-command-options))
       (docked-shell-mode)
-      (insert dircolors)
-      (comint-send-input)
+      (unless (string= dircolors "")
+        (insert dircolors) (comint-send-input))
       (rename-buffer (format "*docked:%d*" num)))))
 
 ;; (read-buffer "Buffer: " "xx" (current-buffer))
 
-(provide 'docked)
+(provide 'dock)

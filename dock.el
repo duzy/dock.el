@@ -140,7 +140,7 @@ on lines which don't start with a prompt."
       ;; Load .dock file.
       (let ((confile (concat default-directory ".dock")))
         (if (file-exists-p confile) ;file-name-as-directory
-            (condition-case er 
+            (condition-case er
                 (if (file-directory-p confile)
                     ;;(error (format "%s is a directory, not suported yet" confile))
                     (mapc (lambda (p) (load-file p)) 
